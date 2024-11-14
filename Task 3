@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.13;
+
+// Aave's core DataTypes and Pool interface
+interface IPool {
+    function supply(
+        address asset,
+        uint256 amount,
+        address onBehalfOf,
+        uint16 referralCode
+    ) external;
+
+    function withdraw(
+        address asset,
+        uint256 amount,
+        address to
+    ) external returns (uint256);
+
+    function getReserveData(address asset)
+        external
+        view
+        returns (ReserveData memory);
+}
+
+interface IERC20 {
+    function transferFrom(
+        address from,
+        address to,
+        uint256 value
+    ) external returns (bool);
+
+    function approve(address spender, uint256 value) external returns (bool);
+
+    function balanceOf(address account) external view returns (uint256);
+}
+
+// ReserveData struct that holds information for the asset
+struct ReserveData {
+    uint128 liquidityIndex;
+    uint128 currentLiquidityRate;
+    uint128 variableBorrowIndex;
+    uint128 currentVariableBorrowRate;
+    uint128 currentStableBorrowRate;
+    uint40 lastUpdateTimestamp;
+    uint16 id;
+    address aTokenAddress;
+    address stableDebtTokenAddress;
+    address variableDebtTokenAddress;
+    address interestRateStrategyAddress;
+    uint128 accruedToTreasury;
+    uint128 unbacked;
+    uint128 isolationModeTotalDebt;
+}
+
+contract AaveLender {
+    address public immutable AAVE_POOL_ADDRESS = 0x48914C788295b5db23aF2b5F0B3BE775C4eA9440; // Sepolia AAVE Pool
+    address public immutable STAKED_TOKEN_ADDRESS = 0x7984E363c38b590bB4CA35aEd5133Ef2c6619C40; // Sepolia DAI token address
+
+    IPool public aavePool;
+
+    // Constructor to initialize the Aave Pool contract
+    constructor() {
+        aavePool = IPool(AAVE_POOL_ADDRESS);
+    }
+
+    // Function to stake DAI
+    function stake(uint256 amount) external {
+        // Transfer DAI to this contract
+        IERC20(STAKED_TOKEN_ADDRESS).transferFrom(msg.sender, address(this), amount);
+
+        // Approve the Aave Pool contract to manage the DAI
+        IERC20(STAKED_TOKEN_ADDRESS).approve(AAVE_POOL_ADDRESS, amount);
+
+        // Supply the DAI to the Aave Pool
+        aavePool.supply(STAKED_TOKEN_ADDRESS, amount, msg.sender, 0);
+    }
+
+    // Function to unstake DAI
+    function unstake(uint256 amount) external {
+        // Retrieve the aDAI address from Aave
+        (ReserveData memory reserveData) = aavePool.getReserveData(STAKED_TOKEN_ADDRESS);
+        address aTokenAddress = reserveData.aTokenAddress;
+
+        // Transfer aDAI from the sender to this contract
+        IERC20(aTokenAddress).transferFrom(msg.sender, address(this), amount);
+
+        // Approve the Aave Pool contract to manage the aDAI
+        IERC20(aTokenAddress).approve(AAVE_POOL_ADDRESS, amount);
+
+        // Withdraw the DAI from the Aave Pool
+        uint256 withdrawnAmount = aavePool.withdraw(STAKED_TOKEN_ADDRESS, amount, msg.sender);
+
+        // Ensure the withdrawal was successful
+        require(withdrawnAmount == amount, "Unstaking failed");
+    }
+}
